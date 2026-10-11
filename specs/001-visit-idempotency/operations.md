@@ -1,6 +1,6 @@
 # Operations: Missing Visit Idempotency Deadlines
 
-This runbook describes the planned implementation. Rehearse it on disposable persistent
+This runbook describes the implemented recovery procedure. Rehearse it on disposable persistent
 MySQL/PostgreSQL data for every retained adapter before release. It introduces no administrative
 HTTP endpoint and applies within the feature's single-instance guarantee.
 
@@ -76,3 +76,12 @@ indefinite replay protection until resolved.
   sampled after commit return and never shortens the minimum 24-hour post-commit window.
 - Inject finalizer rollback and uncertain commit outcome. Creation remains recoverable, and
   maintenance retries cannot renew an established deadline.
+
+## Rehearsal evidence
+
+On 2026-10-11 the restart suites rehearsed this conditional SQL on disposable MySQL 8.4 and
+PostgreSQL 16.3 with jdbc, jpa and spring-data-jpa. Every combination preserved indefinite
+NULL replay through restart and more than ten days, accepted exactly one operator update,
+rejected renewal, and retained the original snapshot. Shared matrix tests verified cleanup
+exclusion, finalizer rollback and uncertain finalizer-commit outcome. See
+[quickstart.md](quickstart.md#final-execution-evidence) for commands, counts and coverage.

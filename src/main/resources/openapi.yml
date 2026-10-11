@@ -551,6 +551,20 @@ paths:
             format: int32
             minimum: 0
             example: 1
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Exactly one opaque case-sensitive value of 1–128 visible ASCII characters;
+            no trimming or comma splitting. Repeated values are invalid. Scope is operation,
+            ownerId, petId and key. Matching retries replay the original result. Retention is
+            at least 24 hours after creation commit; interrupted deadline finalization retains
+            replay protection indefinitely until operator recovery.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[!-~]{1,128}$'
       requestBody:
         description: The details of the new vet visit.
         content:
@@ -560,7 +574,13 @@ paths:
         required: true
       responses:
         201:
-          description: The vet visit was successfully added.
+          description: The vet visit was successfully added, or its original result replayed.
+          headers:
+            Location:
+              description: Original created visit resource location.
+              schema:
+                type: string
+                example: /api/visits/1
           content:
             application/json:
               schema:
@@ -569,6 +589,21 @@ paths:
           description: Bad request.
           content:
             application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        409:
+          description: Visit creation is active for this scope and key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        422:
+          description: Retained key was used with different validated visit values.
+          content:
+            application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
         404:

@@ -1863,6 +1863,294 @@
           }
         }
       ]
+    },
+    {
+      "name": "03 - Visit Idempotency",
+      "description": "Uses the disposable owner/pet created by scenario 01 and a fresh key per run.",
+      "item": [
+        {
+          "name": "Create keyed visit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"visitIdempotencyKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"First visit is created\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"visitOriginalBody\", JSON.stringify(pm.response.json()));",
+                  "pm.collectionVariables.set(\"visitOriginalLocation\", pm.response.headers.get(\"Location\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{visitIdempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"date\":\"2026-10-11\",\"description\":\"idempotency smoke\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owners/{{ownerId}}/pets/{{petId}}/visits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owners",
+                "{{ownerId}}",
+                "pets",
+                "{{petId}}",
+                "visits"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Replay original visit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Replay returns original success\", () => {",
+                  " pm.response.to.have.status(201);",
+                  " pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get(\"visitOriginalBody\")));",
+                  " pm.expect(pm.response.headers.get(\"Location\")).to.eql(pm.collectionVariables.get(\"visitOriginalLocation\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{visitIdempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"description\": \"idempotency smoke\", \"date\": \"2026-10-11\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owners/{{ownerId}}/pets/{{petId}}/visits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owners",
+                "{{ownerId}}",
+                "pets",
+                "{{petId}}",
+                "visits"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject changed visit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Problem response is 422\", () => {",
+                  " pm.response.to.have.status(422);",
+                  " pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  " pm.expect(pm.response.json().type).to.eql(\"urn:petclinic:problem:idempotency-request-mismatch\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{visitIdempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"date\":\"2026-10-11\",\"description\":\"different\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owners/{{ownerId}}/pets/{{petId}}/visits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owners",
+                "{{ownerId}}",
+                "pets",
+                "{{petId}}",
+                "visits"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject invalid key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Problem response is 400\", () => {",
+                  " pm.response.to.have.status(400);",
+                  " pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  " pm.expect(pm.response.json().type).to.eql(\"urn:petclinic:problem:invalid-idempotency-key\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "invalid key"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"date\":\"2026-10-11\",\"description\":\"idempotency smoke\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owners/{{ownerId}}/pets/{{petId}}/visits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owners",
+                "{{ownerId}}",
+                "pets",
+                "{{petId}}",
+                "visits"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Original remains replayable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Errors preserve original result\", () => {",
+                  " pm.response.to.have.status(201);",
+                  " pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get(\"visitOriginalBody\")));",
+                  " pm.expect(pm.response.headers.get(\"Location\")).to.eql(pm.collectionVariables.get(\"visitOriginalLocation\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{visitIdempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"date\":\"2026-10-11\",\"description\":\"idempotency smoke\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owners/{{ownerId}}/pets/{{petId}}/visits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owners",
+                "{{ownerId}}",
+                "pets",
+                "{{petId}}",
+                "visits"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "event": [

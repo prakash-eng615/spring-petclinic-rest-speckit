@@ -518,6 +518,29 @@ class OwnerRestControllerV1Tests {
 
     @Test
     @WithMockUser(roles = "OWNER_ADMIN")
+    void unkeyedVisitPreservesPathAndNullableDateBehavior() throws Exception {
+        org.mockito.Mockito.doAnswer(invocation -> {
+            org.springframework.samples.petclinic.model.Visit visit = invocation.getArgument(0);
+            visit.setId(999);
+            return null;
+        }).when(clinicService).saveVisit(any());
+        for (String path : List.of("/api/owners/1/pets/1/visits",
+                "/api/owners/999/pets/1/visits", "/api/owners/2/pets/1/visits")) {
+            mockMvc.perform(post(path).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"description\":\"baseline\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/api/visits/999"))
+                .andExpect(jsonPath("$.id").value(999))
+                .andExpect(jsonPath("$.petId").value(1));
+        }
+        mockMvc.perform(post("/api/owners/1/pets/1/visits")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"description\":\"\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
+    @WithMockUser(roles = "OWNER_ADMIN")
     void testCreateVisitSuccess() throws Exception {
         VisitDto newVisit = visits.get(0);
         newVisit.setId(999);

@@ -70,3 +70,27 @@ CREATE TABLE IF NOT EXISTS roles (
   KEY fk_username_idx (username),
   CONSTRAINT fk_username FOREIGN KEY (username) REFERENCES users (username)
 ) engine=InnoDB;
+
+-- Retained visit creation successes; no FK to mutable clinic entities.
+CREATE TABLE IF NOT EXISTS visit_creation_results (
+  operation VARCHAR(32) NOT NULL,
+  owner_id INTEGER NOT NULL,
+  pet_id INTEGER NOT NULL,
+  key_hex VARCHAR(256) NOT NULL,
+  request_date DATE,
+  request_description VARCHAR(255) NOT NULL,
+  response_visit_id INTEGER NOT NULL,
+  response_pet_id INTEGER NOT NULL,
+  response_date DATE,
+  response_description VARCHAR(255) NOT NULL,
+  response_status INTEGER NOT NULL CHECK (response_status = 201),
+  response_location VARCHAR(255) NOT NULL,
+  completed_at_ms BIGINT,
+  expires_at_ms BIGINT,
+  INDEX visit_creation_results_expiry (expires_at_ms),
+  PRIMARY KEY (operation, owner_id, pet_id, key_hex),
+  CONSTRAINT visit_result_deadline_pair CHECK (
+    (completed_at_ms IS NULL AND expires_at_ms IS NULL) OR
+    (completed_at_ms IS NOT NULL AND expires_at_ms IS NOT NULL AND expires_at_ms = completed_at_ms + 86400000)
+  )
+);

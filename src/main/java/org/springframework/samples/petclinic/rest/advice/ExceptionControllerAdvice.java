@@ -52,6 +52,51 @@ public class ExceptionControllerAdvice {
     private static final String ERROR_DATA_INTEGRITY = "The requested resource could not be processed due to a data constraint violation";
     private static final String ERROR_INVALID_REQUEST = "The request contains invalid or missing parameters";
 
+    @ExceptionHandler(org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException.class)
+    @ResponseBody
+    public ResponseEntity<ProblemDetail> handleVisitIdempotency(
+            org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException ex) {
+        var reason = ex.getReason();
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.valueOf(reason.status), reason.detail);
+        problem.setType(URI.create(reason.type));
+        problem.setTitle(reason.title);
+        problem.setProperty("timestamp", Instant.now());
+        problem.setProperty("schemaValidationErrors", List.of());
+        return ResponseEntity.status(reason.status).contentType(org.springframework.http.MediaType.APPLICATION_PROBLEM_JSON).body(problem);
+    }
+
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    @ResponseBody
+    public ResponseEntity<ProblemDetail> handleConstraintViolation(jakarta.validation.ConstraintViolationException ex,
+            HttpServletRequest request) {
+        boolean onlyKey = !ex.getConstraintViolations().isEmpty() && ex.getConstraintViolations().stream().allMatch(v -> {
+            String path = v.getPropertyPath().toString();
+            return path.contains("addVisitToOwner") && path.endsWith("idempotencyKey");
+        });
+        if (onlyKey) {
+            return handleVisitIdempotency(new org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException(
+                org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException.Reason.INVALID_KEY));
+        }
+        return handleGeneralException(ex, request);
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.HandlerMethodValidationException.class)
+    @ResponseBody
+    public ResponseEntity<ProblemDetail> handleMethodValidation(
+            org.springframework.web.method.annotation.HandlerMethodValidationException ex, HttpServletRequest request) {
+        boolean onlyKey = ex.getMethod().getName().equals("addVisitToOwner")
+            && !ex.getParameterValidationResults().isEmpty()
+            && ex.getParameterValidationResults().stream().allMatch(v -> {
+                var header = v.getMethodParameter().getParameterAnnotation(org.springframework.web.bind.annotation.RequestHeader.class);
+                return header != null && "Idempotency-Key".equals(header.value());
+            });
+        if (onlyKey) {
+            return handleVisitIdempotency(new org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException(
+                org.springframework.samples.petclinic.rest.idempotency.VisitIdempotencyException.Reason.INVALID_KEY));
+        }
+        return handleGeneralException(ex, request);
+    }
+
     /**
      * Private method for constructing the {@link ProblemDetail} object passing the name and details of the exception
      * class.
@@ -80,7 +125,11 @@ public class ExceptionControllerAdvice {
     @ExceptionHandler(Exception.class)
     @ResponseBody
     public ResponseEntity<ProblemDetail> handleGeneralException(Exception e, HttpServletRequest request) {
-        logger.error("Unexpected error at {} {}", request.getMethod(), request.getRequestURI(), e);
+        if (isKeyedVisitRequest(request)) {
+            logger.error("Keyed visit request failed: error type={}", e.getClass().getSimpleName());
+        } else {
+            logger.error("Unexpected error at {} {}", request.getMethod(), request.getRequestURI(), e);
+        }
         HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
         ProblemDetail detail = this.detailBuild(e, status, request.getRequestURL(), ERROR_UNEXPECTED);
         return ResponseEntity.status(status).body(detail);
@@ -97,11 +146,13 @@ public class ExceptionControllerAdvice {
     @ExceptionHandler(DataIntegrityViolationException.class)
     @ResponseBody
     public ResponseEntity<ProblemDetail> handleDataIntegrityViolationException(DataIntegrityViolationException e, HttpServletRequest request) {
-        logger.warn("Data integrity violation at {} {}: {}",
-            request.getMethod(),
-            request.getRequestURI(),
-            e.getMessage());
-        logger.debug("Data integrity violation stacktrace", e);
+        if (isKeyedVisitRequest(request)) {
+            logger.warn("Keyed visit request failed: data integrity violation");
+        } else {
+            logger.warn("Data integrity violation at {} {}: {}",
+                request.getMethod(), request.getRequestURI(), e.getMessage());
+            logger.debug("Data integrity violation stacktrace", e);
+        }
         HttpStatus status = HttpStatus.NOT_FOUND;
         ProblemDetail detail = this.detailBuild(e, status, request.getRequestURL(), ERROR_DATA_INTEGRITY);
         return ResponseEntity.status(status).body(detail);
@@ -137,14 +188,19 @@ public class ExceptionControllerAdvice {
                         .putAdditionalProperty("defaultMessage", defaultMessage);
                 })
                 .toList();
-            logger.debug("Validation error at {} {}: {}",
-                request.getMethod(),
-                request.getRequestURI(),
-                bindingResult.getFieldErrors());
+            if (!isKeyedVisitRequest(request)) {
+                logger.debug("Validation error at {} {}: {}",
+                    request.getMethod(), request.getRequestURI(), bindingResult.getFieldErrors());
+            }
             detail.setProperty("schemaValidationErrors", schemaValidationErrors);
             return ResponseEntity.status(status).body(detail);
         }
         return ResponseEntity.status(status).body(detail);
+    }
+
+    private boolean isKeyedVisitRequest(HttpServletRequest request) {
+        return request.getHeader("Idempotency-Key") != null
+            && request.getRequestURI().matches(".*/api/owners/[^/]+/pets/[^/]+/visits");
     }
 
 }

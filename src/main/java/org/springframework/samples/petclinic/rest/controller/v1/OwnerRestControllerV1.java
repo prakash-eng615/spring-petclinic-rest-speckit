@@ -60,15 +60,24 @@ public class OwnerRestControllerV1 implements OwnersApi {
     private final PetMapper petMapper;
 
     private final VisitMapper visitMapper;
+    private final org.springframework.samples.petclinic.service.VisitCreationCoordinator visitCreation;
+    private final org.springframework.samples.petclinic.rest.idempotency.IdempotencyKeyValidator keyValidator;
+    private final jakarta.servlet.http.HttpServletRequest request;
 
     public OwnerRestControllerV1(ClinicService clinicService,
                                  OwnerMapper ownerMapper,
                                  PetMapper petMapper,
-                                 VisitMapper visitMapper) {
+                                 VisitMapper visitMapper,
+                                 org.springframework.samples.petclinic.service.VisitCreationCoordinator visitCreation,
+                                 org.springframework.samples.petclinic.rest.idempotency.IdempotencyKeyValidator keyValidator,
+                                 jakarta.servlet.http.HttpServletRequest request) {
         this.clinicService = clinicService;
         this.ownerMapper = ownerMapper;
         this.petMapper = petMapper;
         this.visitMapper = visitMapper;
+        this.visitCreation = visitCreation;
+        this.keyValidator = keyValidator;
+        this.request = request;
     }
 
     @PreAuthorize("hasRole(@roles.OWNER_ADMIN)")
@@ -174,7 +183,15 @@ public class OwnerRestControllerV1 implements OwnersApi {
 
     @PreAuthorize("hasRole(@roles.OWNER_ADMIN)")
     @Override
-    public ResponseEntity<VisitDto> addVisitToOwner(Integer ownerId, Integer petId, VisitFieldsDto visitFieldsDto) {
+    public ResponseEntity<VisitDto> addVisitToOwner(Integer ownerId, Integer petId, VisitFieldsDto visitFieldsDto,
+            String idempotencyKey) {
+        var key = keyValidator.validate(request);
+        if (key.isPresent()) {
+            var scope = org.springframework.samples.petclinic.model.VisitCreationScope.of(ownerId, petId, key.get());
+            var result = visitCreation.create(scope, visitFieldsDto);
+            return ResponseEntity.status(result.getResponseStatus())
+                .location(java.net.URI.create(result.getResponseLocation())).body(result.responseBody());
+        }
         HttpHeaders headers = new HttpHeaders();
         Visit visit = visitMapper.toVisit(visitFieldsDto);
         Pet pet = new Pet();

@@ -23,4 +23,14 @@ springboot-petclinic-server/
 .factorypath
 
 # newman reports
-./src/test/postman/reports/
+/src/test/postman/reports/
+
+# JVM outputs and local artifacts
+*.class
+*.jar
+*.log
+.env*
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
