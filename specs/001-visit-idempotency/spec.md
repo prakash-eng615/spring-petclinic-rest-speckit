@@ -11,6 +11,18 @@
 compare the validated visit body within the operation/owner/pet scope and ignore other
 headers; apply restart durability to persistent-storage deployments only.
 
+## Clarifications
+
+### Session 2026-10-11
+
+- Q: Must duplicate prevention work when retries reach different running instances of the same deployment sharing clinic data? → A: Guarantee idempotency only within a single running instance (Option B).
+
+The idempotency guarantees apply within one running application instance and, for
+persistent-storage deployments, across that instance's normal restart. Requests processed
+by different concurrently running instances are outside the duplicate-prevention guarantee,
+even when they share clinic data. This is a guarantee boundary, not an additional key-scope
+field; no multi-instance routing or coordination requirement is introduced.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Recover a successful visit after a lost response (Priority: P1)
@@ -69,16 +81,17 @@ predictable outcomes without duplicate visits or changes to the first result.
 **Why this priority**: Retries often overlap, and an incorrect retry must not silently
 record a different visit under an already used key.
 
-**Independent Test**: Hold one keyed creation in progress, submit overlapping requests,
-complete the first, and retry with both matching and changed visit values.
+**Independent Test**: Within one running instance, hold one keyed creation in progress,
+submit overlapping requests, complete the first, and retry with both matching and changed
+visit values.
 
 **Acceptance Scenarios**:
 
-1. **Given** creation is in progress for a scope and key, **When** another valid request
-   arrives with that scope and key before completion, **Then** it receives 409 and
+1. **Given** creation is in progress within one instance for a scope and key, **When**
+   another valid request arrives with that scope and key before completion, **Then** it receives 409 and
    `application/problem+json`, whether its body matches or differs; it creates no visit.
-2. **Given** overlapping matching requests for an unused scope/key, **When** they are
-   processed, **Then** at most one visit is created; requests encountering an in-progress
+2. **Given** overlapping matching requests within one instance for an unused scope/key,
+   **When** they are processed, **Then** at most one visit is created; requests encountering an in-progress
    attempt receive 409, and matching requests encountering its completed success replay it.
 3. **Given** a retained completed success, **When** the same scope/key is used with a
    different validated visit date or description, **Then** the request receives 422 and
@@ -152,6 +165,8 @@ persistent-storage deployment before replaying a completed creation.
   that was never successfully created.
 - A matching retry observed just after completion replays success; one observed before
   completion receives 409. Retention is measured from completion, not request arrival.
+- Requests processed by different concurrent instances may create separate visits; the
+  guarantee does not require cross-instance duplicate suppression or result coordination.
 - A changed ownerId or petId creates a different scope; existing owner/pet checks must not
   be broadened or fixed incidentally, even if current behavior is surprising.
 
@@ -176,7 +191,8 @@ persistent-storage deployment before replaying a completed creation.
 - **FR-007**: A matching retry before expiry MUST return the original success status,
   body, visit identity and location and MUST NOT create or modify a visit. Subsequent edits
   or deletion of the visit MUST NOT change that retained creation result or recreate data.
-- **FR-008**: Concurrent requests sharing scope/key MUST create at most one visit.
+- **FR-008**: Concurrent requests within one running instance sharing scope/key MUST
+  create at most one visit.
   A valid duplicate encountering an in-progress attempt MUST receive 409
   `application/problem+json` without a new visit, regardless of body equality.
 - **FR-009**: After successful completion and before expiry, a valid request with the same
@@ -191,8 +207,8 @@ persistent-storage deployment before replaying a completed creation.
 - **FR-012**: Results MUST remain replayable for 24 hours from successful completion;
   retries MUST NOT renew retention. At or after expiry, the key MAY be treated as unused.
 - **FR-013**: Successful outcomes and their retention deadline MUST survive a normal
-  application restart in persistent-storage deployments. In-memory demo/test deployments
-  MUST provide the guarantees during their running lifetime only.
+  application restart of the single instance in persistent-storage deployments. In-memory
+  demo/test deployments MUST provide the guarantees during their running lifetime only.
 - **FR-014**: The new 400, 409 and 422 errors MUST use `application/problem+json` and
   identify the respective invalid-key, in-progress or mismatched-request condition in a
   structured problem response with status, title and explanatory detail. Existing unkeyed
@@ -208,7 +224,8 @@ persistent-storage deployment before replaying a completed creation.
 - **FR-018**: The feature MUST NOT extend idempotency to other endpoints, create a general
   idempotency framework or key-administration endpoints, add a replay-marker header, change
   authentication/authorization, fix unrelated owner/pet validation, or promise multi-region
-  or disaster-recovery behavior.
+  or disaster-recovery behavior. Cross-instance coordination and duplicate-prevention
+  guarantees for requests processed by different concurrent instances are also out of scope.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -227,11 +244,13 @@ persistent-storage deployment before replaying a completed creation.
 
 ### Measurable Outcomes
 
-- **SC-001**: In every accepted keyed retry scenario within retention, the visit count
-  increases by exactly one across the original and all matching retries, and 100% of completed
+- **SC-001**: In every accepted keyed retry scenario within the single-instance guarantee
+  and retention window, the visit count increases by exactly one across the original and all
+  matching retries, and 100% of completed
   retries recover the same original visit identity, location and success result.
-- **SC-002**: In every overlapping-submission scenario, no more than one visit is created;
-  every request observed during processing receives the defined conflict result, and every
+- **SC-002**: In every overlapping-submission scenario within one running instance,
+  no more than one visit is created; every request observed during processing receives the
+  defined conflict result, and every
   matching request observed after success recovers the original booking.
 - **SC-003**: 100% of invalid-key and completed-key-mismatch scenarios produce their defined
   rejection and zero unintended visit creations or modifications; every tested validation
@@ -247,6 +266,11 @@ persistent-storage deployment before replaying a completed creation.
 
 ## Assumptions
 
+- **Confirmed instance boundary**: Idempotency is guaranteed for requests processed within
+  one running instance and its normal persistent-storage restart. Different concurrent
+  instances sharing clinic data are outside the guarantee. All scenarios and measurable
+  outcomes are evaluated within this boundary; no extra user or instance dimension is added
+  to the declared operation/owner/pet/key scope.
 - **Confirmed comparison decision**: Validated visit body plus scoped operation and path IDs
   define equality; other headers are ignored. Present body fields are date and description.
   Accepted equal values compare equally; differing description strings remain different.
