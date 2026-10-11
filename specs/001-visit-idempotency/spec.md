@@ -15,6 +15,8 @@ headers; apply restart durability to persistent-storage deployments only.
 
 ### Session 2026-10-11
 
+- Q: What starts the guaranteed 24-hour replay window? → A: Successful database commit; require at least 24 hours afterward, even if this needs a design change.
+- Q: What happens if the snapshot commits but the deadline is not saved? → A: Keep it replayable indefinitely until an operator resolves the missing deadline; add an operational recovery procedure.
 - Q: Must duplicate prevention work when retries reach different running instances of the same deployment sharing clinic data? → A: Guarantee idempotency only within a single running instance (Option B).
 
 The idempotency guarantees apply within one running application instance and, for
@@ -137,16 +139,21 @@ persistent-storage deployment before replaying a completed creation.
 
 **Acceptance Scenarios**:
 
-1. **Given** successful completion at time T, **When** a matching retry is processed
-   before T + 24 hours, **Then** it replays the original result; replay does not extend T.
+1. **Given** visit/snapshot commit at C and a deadline anchor T sampled afterward, **When**
+   a matching retry is processed before T + 24 hours, **Then** it replays the original result;
+   T >= C, delayed commit cannot shorten the guaranteed window, and replay does not extend T.
 2. **Given** that success in a persistent-storage deployment, **When** the application
    restarts normally within the retention period and the client retries, **Then** the same
    visit identity and original result are returned with no new visit.
-3. **Given** a key at or beyond T + 24 hours, **When** it is submitted again, **Then** it may
+3. **Given** a key with an established deadline at or beyond T + 24 hours, **When** it is submitted again, **Then** it may
    be treated as unused and a new accepted creation may return a new visit identity.
 4. **Given** an in-memory demo/test deployment, **When** it runs without restarting,
-   **Then** the same 24-hour rules apply during that lifetime; persistence across a restart
+   **Then** the same retention rules apply during that lifetime; persistence across a restart
    that loses its visit data is outside this guarantee.
+5. **Given** a committed snapshot whose deadline finalization failed or was interrupted,
+   **When** the application restarts or the client retries even after 24 hours, **Then** the
+   original response remains replayable without another visit, a differing request gets 422,
+   and cleanup leaves it intact until an operator establishes a fixed future deadline.
 
 ### Edge Cases
 
@@ -163,8 +170,10 @@ persistent-storage deployment before replaying a completed creation.
 - A lost response after successful completion replays success; rollback before completion
   leaves the key reusable. A normal restart must not expose a successful result for a visit
   that was never successfully created.
-- A matching retry observed just after completion replays success; one observed before
-  completion receives 409. Retention is measured from completion, not request arrival.
+- A matching retry observed after admission release replays success; one encountering an
+  active creation/finalization receives 409. Retention cannot expire earlier than 24 hours
+  after the visit/snapshot commit, even when commit is delayed. Finalization failure after
+  that commit preserves successful replay protection rather than undoing the committed visit.
 - Requests processed by different concurrent instances may create separate visits; the
   guarantee does not require cross-instance duplicate suppression or result coordination.
 - A changed ownerId or petId creates a different scope; existing owner/pet checks must not
@@ -204,8 +213,13 @@ persistent-storage deployment before replaying a completed creation.
 - **FR-011**: Successful creation and its replayable result MUST become effective together;
   neither a replayable success without its successfully created visit nor a successful keyed
   creation without retry protection may be exposed as a completed outcome.
-- **FR-012**: Results MUST remain replayable for 24 hours from successful completion;
-  retries MUST NOT renew retention. At or after expiry, the key MAY be treated as unused.
+- **FR-012**: Results MUST remain replayable for at least 24 hours after the visit and
+  replay snapshot successfully commit together. A fixed deadline MUST be established using
+  a timestamp sampled after that commit; retries MUST NOT renew an established deadline.
+  If deadline finalization is interrupted or fails, the committed snapshot MUST remain
+  replayable indefinitely until an operator establishes its deadline using the documented
+  recovery procedure. Restart, replay and cleanup MUST NOT automatically finalize or expire
+  such a snapshot. At or after an established deadline, the key MAY be treated as unused.
 - **FR-013**: Successful outcomes and their retention deadline MUST survive a normal
   application restart of the single instance in persistent-storage deployments. In-memory
   demo/test deployments MUST provide the guarantees during their running lifetime only.
@@ -238,7 +252,8 @@ persistent-storage deployment before replaying a completed creation.
 - **Creation attempt**: Processing in progress for a scoped key; success makes a result
   replayable, while validation failure or rollback leaves the key reusable.
 - **Retained success result**: The original successful creation response, its visit identity,
-  resource location, completion time and 24-hour retention deadline.
+  resource location and deadline metadata. Deadline fields remain unset for interrupted
+  finalization, protecting the committed response indefinitely until operator recovery.
 
 ## Success Criteria *(mandatory)*
 
@@ -257,7 +272,9 @@ persistent-storage deployment before replaying a completed creation.
   failure or rollback permits subsequent successful reuse of the key.
 - **SC-004**: 100% of retained successful bookings tested across a normal restart in a
   persistent-storage deployment remain recoverable without a duplicate during the original
-  24-hour window; retries never extend that window.
+  minimum 24-hour post-commit window; retries never extend an established deadline.
+  Committed snapshots with missing deadlines remain replayable across restart and beyond
+  24 hours until the operator establishes their deadlines.
 - **SC-005**: Existing clients pass all established unkeyed visit-creation acceptance cases
   with unchanged outcomes, and other endpoints retain their existing behavior.
 - **SC-006**: A client can complete the lost-response recovery flow by retrying the same
@@ -281,9 +298,11 @@ persistent-storage deployment before replaying a completed creation.
 - **Key interpretation**: “Visible ASCII” means U+0021–U+007E; spaces and control characters
   are invalid. Equality uses the exact accepted value. Multiple values refer to repeated
   header values, not arbitrary punctuation within one opaque value.
-- **Retention boundary**: The guaranteed window is completion time inclusive through, but
-  excluding, completion + 24 hours. Expired-key treatment is deliberately permissive as in
-  the feature request; physical cleanup timing is not a client guarantee.
+- **Retention boundary**: The minimum guaranteed window starts at successful visit/snapshot
+  commit C. Normal deadline finalization samples T >= C after commit and establishes expiry
+  T + 24 hours, exclusive. Missing deadlines retain protection indefinitely until operator
+  recovery; recovery establishes T from its current UTC time and never rewrites an existing
+  deadline. Physical cleanup timing is not a client guarantee.
 - **Replay contents**: “Original result” means original creation status, body and resource
   location; transport-generated metadata such as response time/date is not frozen. No new
   replay-marker response header is needed.

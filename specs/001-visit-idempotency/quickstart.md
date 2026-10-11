@@ -98,15 +98,22 @@ characterization baseline, not a new membership rule. Other endpoints must remai
 | FR-001–005 | Header absent/present; length 1/128/129; empty/blank/control/non-ASCII; repeated values; comma punctuation; key case; scope independence; reordered JSON; other headers; nullable date; exact description changes |
 | FR-006–009 | Original 201/body/Location; immutable snapshot after edit/delete; two completed replays both succeed; latch-held first transaction gets 409 for matching/differing duplicates, then replay or 422 after commit |
 | FR-010–011 | Invalid body then corrected same key; failure after visit write; result insert/flush/commit failure; neither visit nor success remains; admission released; subsequent attempt succeeds |
-| FR-012–013 | Controllable Clock before T+24h and at/after T+24h; no refresh on replay; delayed creation does not anchor TTL at arrival; expired replacement rollback; persistent normal restart with original deadline |
+| FR-012–013 | Clock before/at/after T+24h; T sampled after delayed creation commit; no refresh; finalizer failure/crash preserves indefinite replay; operator-only missing-deadline recovery; expired replacement rollback; persistent restart preserves established or NULL deadlines |
 | FR-014–015 | New problem media type/status; generated parameter-validation errors map correctly; legacy errors unchanged; real filter-chain anonymous/wrong-role rejection and authorized replay |
 | FR-016–018 | Shared contract across retained adapters/dialects; no owner/pet fix, new authorization, other endpoint behavior, replay marker or cross-instance guarantee; full existing quality gates |
 | Cleanup | Expired-candidate deletion cannot remove a fresh replacement; delayed/disabled cleanup does not alter lazy expiry correctness |
 
 Use latches/barriers and bounded test waits, not sleeps or racing two curl commands. Force both
-pre-commit overlap and post-commit replay. Keep the active gate through a deliberately delayed
-commit; release after rollback. Do not require cross-instance duplicate prevention.
+pre-commit overlap and post-commit replay. Keep the active gate through deliberately delayed creation commit and immediate deadline
+finalization; release after their proxy returns. Advance Clock during a held creation commit
+and assert the deadline anchor is sampled afterward. Finalization rollback must leave the
+committed visit and indefinite replay protection intact; creation rollback leaves neither. Do not require cross-instance duplicate prevention.
 
+All four concrete database runners extend `AbstractVisitIdempotencyTests`, which implements
+the reusable concurrency, rollback, retention/finalization and cleanup JUnit test interfaces.
+Each interface uses the same real-service fixture accessors; default test methods are inherited
+by every concrete runner. Header/MVC/security tests run separately. The test-only profiles
+resolver validates `petclinic.test.repository` and selects exactly one adapter.
 Run the shared real-adapter suite for H2/HSQLDB with `jdbc`, `jpa`, `spring-data-jpa`. For MySQL
 and PostgreSQL, use environment-gated proposed suites `VisitIdempotencyMysqlTests` and
 `VisitIdempotencyPostgresTests`, each driven by proposed test-only property
@@ -115,6 +122,8 @@ MYSQL_URL/MYSQL_USER/MYSQL_PASS or POSTGRES_URL/POSTGRES_USER/POSTGRES_PASS vari
 
 ```sh
 for VISIT_ADAPTER in jdbc jpa spring-data-jpa; do
+  ./mvnw -Dtest=VisitIdempotencyH2Tests -Dpetclinic.test.repository="$VISIT_ADAPTER" test
+  ./mvnw -Dtest=VisitIdempotencyHsqlTests -Dpetclinic.test.repository="$VISIT_ADAPTER" test
   ./mvnw -Dtest=VisitIdempotencyMysqlTests -Dpetclinic.test.repository="$VISIT_ADAPTER" test
   ./mvnw -Dtest=VisitIdempotencyPostgresTests -Dpetclinic.test.repository="$VISIT_ADAPTER" test
 done
@@ -144,7 +153,10 @@ Stop only the application normally; leave the database running with its data int
 Retry with the original key/body within retention. Expected: same 201/body/Location and no new
 visit; original deadline remains fixed. Repeat using PostgreSQL and both other adapters through
 the automated matrix. Initialize once, then disable startup init for retained-data validation;
-never run a schema-reset script between the two application contexts. HSQL's destructive reset
+never run a schema-reset script between the two application contexts. Also interrupt the
+process between creation commit and deadline finalization: verify NULL/NULL survives restart,
+matching replay works even after 24 hours, changed body gets 422, cleanup skips the row and
+only the operator procedure in [operations.md](operations.md) may establish its deadline. HSQL's destructive reset
 and default in-memory H2 are not evidence of persistent restart durability.
 
 ## 6. Existing smoke checks and evidence

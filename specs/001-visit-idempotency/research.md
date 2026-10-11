@@ -24,7 +24,8 @@ scope expansion. Inferring runtime compatibility from version numbers alone is i
 
 **Decision:** Feature-specific local active-create registry plus durable completed-result lookup.
 Read completed results without claiming a creation gate; claim only for absent/expired results,
-and recheck in a fresh worker transaction. Hold the gate until commit/rollback completes.
+and recheck in a fresh worker transaction. Hold the gate through creation commit/rollback and,
+for new committed success, the immediate deadline-finalizer proxy return.
 Check active creation before database reads so a transaction lock cannot turn a required 409
 into waiting. Handle a just-finished admission race by rereading completed results.
 
@@ -44,7 +45,8 @@ Cross-instance coordination remains out of scope, not an added instance componen
 
 **Decision:** Store visit creation and immutable response snapshot in one service transaction.
 Persist only completed-success records, with request comparison values and response scalar
-values, status, location and retention metadata. No foreign keys to live owner, pet or visit.
+values, status, location and initially NULL retention metadata. Only deadline metadata may
+transition once in a separate post-creation-commit service transaction; snapshot fields stay immutable. No foreign keys to live owner, pet or visit.
 
 **Rationale:** Existing JDBC assigns generated visit ID, JPA uses persist/IDENTITY, and Spring
 Data uses the same model (`JdbcVisitRepositoryImpl.save`, `JpaVisitRepositoryImpl.save`,
@@ -98,16 +100,20 @@ Spring supports ProblemDetail from exception handlers
 
 ## 6. Retention, reset lifetimes and cleanup
 
-**Decision:** Inject UTC Clock, record logical completion at the final successful transaction
-work rather than request arrival, and set expiry to that recorded T + 24 hours. The record
-exists as a success only if the transaction commits. Expiry checks use `now >= expiresAt`;
+**Decision (revised by user clarification):** Commit visit and replay snapshot atomically with
+NULL deadline fields, then sample UTC Clock after proxy commit return and conditionally finalize
+T and T + 24 hours in a separate service transaction. This guarantees at least 24 hours after
+creation commit regardless of its latency. NULL deadlines protect success indefinitely; failed
+or interrupted finalization requires operator recovery, never automatic finalization on replay
+or restart. Existing deadlines never change. Expiry checks use non-null `now >= expiresAt`;
 replay never updates retention. Reuse deletes/replaces an expired row in the creation transaction.
 Add bounded cleanup with conditional deletes against the observed expiry, outside creation
 transactions; correctness never depends on cleanup running.
 
 **Rationale:** Clock and BIGINT avoid dialect timezone/precision differences and enable exact
 boundary tests. Completion/commit ordering and delayed-work tests must ensure early admission
-timestamps do not shorten retention. There is no durable in-progress state to recover.
+timestamps or delayed commits do not shorten retention. There is no durable in-progress state
+to recover; a NULL-deadline row is already a committed successful response.
 Persistent restart tests initialize data once and restart with SQL init disabled; HSQL's
 existing table-drop script and H2's default memory URL are intentionally not durable profiles.
 

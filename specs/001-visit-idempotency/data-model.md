@@ -38,13 +38,19 @@ expiry. These are planned logical columns, not an executable migration.
 | response_description | VARCHAR(255), NOT NULL | Original response description |
 | response_status | INTEGER, NOT NULL | 201 |
 | response_location | VARCHAR(255), NOT NULL | Original `/api/visits/{id}` value |
-| completed_at_ms | BIGINT, NOT NULL | UTC Clock logical successful-completion T |
-| expires_at_ms | BIGINT, NOT NULL | T + 86,400,000 milliseconds |
+| completed_at_ms | BIGINT, nullable | UTC Clock post-commit deadline anchor T; NULL until finalized |
+| expires_at_ms | BIGINT, nullable | T + 86,400,000 milliseconds; NULL means indefinite replay protection |
 
-The record is inserted in the same transaction as the visit. Logical completion is sampled
-at the final successful processing step, after visit creation/response materialization and
-constraint flush; the success becomes visible only when commit succeeds. Admission time is
-not the retention anchor. No committed result exists for a failed attempt.
+The complete response record is inserted in the same transaction as the visit, with both
+deadline fields NULL. Enforce the pair invariant: both NULL or both non-null with
+expires_at_ms = completed_at_ms + 86,400,000. NULL/NULL is a committed success, never durable
+in-progress state. It is replayable indefinitely and excluded from expiry lookup/deletion.
+After creation commit C, sample UTC Clock T >= C and finalize both fields in a separate service
+transaction using a conditional update matching scope, response_visit_id and NULL/NULL.
+Do not modify response/request fields. Once set, the deadline is immutable. A failed finalizer
+leaves successful replay protection intact; a rollback of the creation itself leaves no result.
+Only the immediate creation flow attempts automatic finalization. Interrupted/failed finalization
+requires the operator procedure in operations.md; no replay/restart/cleanup may start its clock.
 
 Do not add FK/ORM relationships to Visit, Pet or Owner. Original snapshots must survive their
 updates/deletions. Scalar IDs are historical response facts. Reconstruct a new VisitDto from
@@ -59,7 +65,7 @@ persistent-profile DDL is additive and never truncates retained results or clini
 
 A concurrent registry maps scopes to active creation ownership tokens. This state exists only
 for an admitted creation, never for all retained keys. It is not a database table, persistent
-reservation or distributed lease. Registry ownership lasts through transactional proxy return
+reservation or distributed lease. Registry ownership lasts through creation and immediate finalization proxy return
 and is removed with an ownership check in finally. Successful completion is published before
 release; failed completion releases without a replay result.
 
@@ -70,11 +76,13 @@ release; failed completion releases without a replay result.
 | Header absent | Any | Existing unkeyed path; no feature record or admission |
 | Invalid key/body | New attempt | Reject through applicable validation; no key consumption |
 | Active creation within this instance | Valid duplicate, any body | 409; no write by duplicate |
-| Unexpired retained success | Equal validated date/description | Replay original 201/body/Location; no mutation |
-| Unexpired retained success | Different validated values | 422; original unchanged |
+| Unexpired or NULL-deadline retained success | Equal validated date/description | Replay original 201/body/Location; no mutation |
+| Unexpired or NULL-deadline retained success | Different validated values | 422; original unchanged |
 | No retained success or expired result | Valid request | Try local admission, then recheck within fresh worker transaction |
-| Admitted, recheck finds unexpired result | Equal/different | Replay/422 without new visit; release admission |
-| Admitted, no usable result | Creation commits | Visit and retained result become visible together |
+| Admitted, recheck finds unexpired or NULL-deadline result | Equal/different | Replay/422 without new visit; release admission |
+| Admitted, no usable result | Creation commits | Visit and retained result with NULL deadline become visible together |
+| Committed result, admission held | Immediate finalization commits | Fixed post-commit deadline established; publish/release |
+| Committed result | Finalization fails/process stops | Indefinite replay protection; operator recovery only |
 | Admitted, creation fails/rolls back | Any failure | No new visit/success record; release admission |
 | Expired result replacement fails | Rollback | Old expired row may remain, but next attempt can still reuse key |
 | Persistent normal restart | Completed success | Lookup retained result and same original deadline |
@@ -88,7 +96,8 @@ that they concern this feature's scope.
 ## Repository contract
 
 `VisitCreationResultRepository` exposes scoped lookup, insert, conditional expired deletion,
-and bounded expired-candidate lookup. A scope/result model has identical meaning across:
+bounded expired-candidate lookup, and conditional one-time deadline finalization. Both expiry
+operations exclude NULL deadlines; finalization also matches the original response_visit_id. A scope/result model has identical meaning across:
 
 - JDBC adapter: NamedParameterJdbcTemplate, bound scope parameters and explicit row mapping.
 - JPA adapter: EntityManager find/persist/remove or conditional bulk delete with persistence
@@ -105,8 +114,11 @@ and replacement inside the admitted creation transaction remain authoritative.
 1. Visit write and retained result write share one transaction manager/connection context;
    either both commit or neither does, including failures at flush/commit.
 2. Request equality uses Java LocalDate/String equality, never SQL collation or raw JSON.
-3. First success snapshot and deadline are immutable during replay and mismatch handling.
+3. First success snapshot is immutable. Deadline metadata transitions once from NULL/NULL to
+   a fixed pair; established deadlines are immutable during replay, restart and mismatch handling.
 4. All rejected key/conflict requests cause zero new visit writes or retained-result mutations.
-5. At `now >= expiresAt`, a key is eligible for replacement; retries never renew expiry.
+5. At `now >= expiresAt` for a non-null deadline, a key is eligible for replacement; retries
+   never renew expiry. NULL deadlines never expire automatically. Delayed commit cannot reduce
+   protection below 24 hours after creation commit.
 6. Gate ownership cannot be released before commit/rollback, leaked after failure, or claimed
    by completed replays. Tests deliberately hold creation and commit boundaries with latches.

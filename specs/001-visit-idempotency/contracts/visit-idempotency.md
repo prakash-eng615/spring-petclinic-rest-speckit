@@ -84,8 +84,13 @@ or additional header is added.
 
 ## Retention and recovery
 
-The successful logical completion timestamp T anchors a fixed 24-hour interval. At or after
-T + 24 hours this design treats the key as unused. Replays and rejections never extend T.
+Visit and response snapshot commit together at C. A deadline anchor T sampled afterward
+(T >= C) establishes expiry T + 24 hours, guaranteeing at least 24 hours after commit. At or
+after an established expiry this design treats the key as unused. Replays and rejections never
+extend T. If deadline finalization fails or is interrupted, the committed result remains
+replayable indefinitely, including across persistent restart; only the operator procedure in
+../operations.md may establish its deadline. There is no automatic deadline recovery or key
+administration endpoint. Failure of this metadata write does not undo creation or change its 201.
 On persistent restart, original identity, response values, Location and deadline remain.
 In-memory demo/test results last only for their data lifetime. Rolled-back/invalid attempts
 create no retained success; a corrected request can reuse the intended key.
