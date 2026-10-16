@@ -34,3 +34,29 @@ Thumbs.db
 *.tmp
 *.swp
 .vscode/
+
+# A sanitized template may be shared; actual environment files stay local.
+!.env.example
+
+# Local credentials and agent session data
+.aws/
+.codex/auth.json
+.codex/sessions/
+.codex/log/
+
+# Private keys and keystores
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Local database files and rotated logs
+*.mv.db
+*.h2.db
+*.trace.db
+*.log.*
+
+# The Maven wrapper is part of the reproducible build, not a build artifact.
+!/.mvn/wrapper/maven-wrapper.jar

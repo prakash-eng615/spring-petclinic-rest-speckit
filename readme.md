@@ -1,3 +1,43 @@
+# GitHub Spec Kit Experiment — Spring PetClinic REST
+
+This repository documents a hands-on experiment using [GitHub Spec Kit](https://github.com/github/spec-kit) to make an enhancement to an existing application.
+
+The application is [Spring PetClinic REST](https://github.com/spring-petclinic/spring-petclinic-rest), an open-source Spring Boot REST API.
+
+The experiment adds optional **idempotency-key support** to the existing visit-creation endpoint, allowing clients to retry a request without creating duplicate visits.
+
+The goal is to explore how GitHub Spec Kit works with an established codebase, particularly:
+
+- How much initial setup and understanding of the existing application is required?
+- How well does the specification-driven workflow support enhancements to existing code?
+- How much human guidance and intervention is needed?
+- What works well, and where does the workflow introduce friction?
+
+This is a practical experiment, not a comprehensive benchmark or formal evaluation of Spec Kit.
+
+### Reproduce the experiment
+
+- [Experiment setup](speckit-experiment-docs/EXPERIMENT_SETUP.md) — Clone the original application and recreate the experiment baseline.
+- [Spec Kit resources](speckit-experiment-docs/SPEC_KIT_RESOURCES.md) — Official documentation, installation instructions, and SDD references.
+- [Spec Kit initialization commands](speckit-experiment-docs/commands.md) — Commands used to initialize the workflow.
+
+### Public experiment notes
+
+- This is a local learning/demo application. Authentication is disabled by default. The sample `admin/admin` login, `petclinic/petclinic` database credentials and Compose's empty MySQL root password are public demo values, not production credentials. Use disposable local data; do not expose this setup publicly as a running service.
+- The prompts, specifications, constitution and shared Spec Kit tooling are intentionally included so readers can follow the experiment. Keep real environment files, credentials, local database files and agent sessions out of Git. Any `.env.example` must contain placeholders only.
+- This experiment removes the inherited Docker publishing workflow and SonarCloud upload step. Maven build/coverage verification and the existing pull-request and Newman workflows remain. Before using the upstream README's manual Jib publishing commands, explicitly set your own image destination and credentials; the inherited POM still names the upstream image namespace.
+- The badges, clone commands and contribution links in the original documentation below refer to the upstream project, not this experiment's CI results. The original license and attribution are retained in [LICENSE.txt](LICENSE.txt).
+
+---
+
+## Original Spring PetClinic REST Documentation
+
+*The original project's README continues below, unchanged.*
+
+
+---
+
+
 # REST version of Spring PetClinic Sample Application (spring-framework-petclinic extension)
 
 [![Java Build Status](https://github.com/spring-petclinic/spring-petclinic-rest/actions/workflows/maven-build-master.yml/badge.svg)](https://github.com/spring-petclinic/spring-petclinic-rest/actions/workflows/maven-build-master.yml)
