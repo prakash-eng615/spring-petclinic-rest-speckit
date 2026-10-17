@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+/*
+ * Modification notice: This file was changed for this repository's independent
+ * GitHub Spec Kit experiment on Spring PetClinic REST.
+ */
 package org.springframework.samples.petclinic.rest.advice;
 
 import java.net.URI;

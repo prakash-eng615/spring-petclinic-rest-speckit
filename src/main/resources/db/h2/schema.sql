@@ -1,3 +1,5 @@
+-- Modification notice: This file was changed for this repository's independent
+-- GitHub Spec Kit experiment on Spring PetClinic REST.
 CREATE TABLE IF NOT EXISTS vets (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   first_name VARCHAR(30) NOT NULL,

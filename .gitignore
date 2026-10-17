@@ -1,3 +1,5 @@
+# Modification notice: This file was changed for this repository's independent
+# GitHub Spec Kit experiment on Spring PetClinic REST.
 target/*
 .settings/*
 .classpath
