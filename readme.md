@@ -28,6 +28,10 @@ This is a practical experiment, not a comprehensive benchmark or formal evaluati
 - This experiment removes the inherited Docker publishing workflow and SonarCloud upload step. Maven build/coverage verification and the existing pull-request and Newman workflows remain. Before using the upstream README's manual Jib publishing commands, explicitly set your own image destination and credentials; the inherited POM still names the upstream image namespace.
 - The badges, clone commands and contribution links in the original documentation below refer to the upstream project, not this experiment's CI results. The original license and attribution are retained in [LICENSE.txt](LICENSE.txt).
 
+### Licensing and attribution
+
+This repository is an independent GitHub Spec Kit experiment based on [Spring PetClinic REST](https://github.com/spring-petclinic/spring-petclinic-rest) at baseline commit `4cd8e1b0cd42578e882247d8801f6be5d402f118`. The original application is licensed under the [Apache License 2.0](LICENSE.txt); its license and contributor attribution are preserved. Bundled GitHub Spec Kit tooling is licensed under MIT; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its attribution and license text.
+
 ---
 
 ## Original Spring PetClinic REST Documentation

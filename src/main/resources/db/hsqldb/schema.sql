@@ -1,3 +1,5 @@
+-- Modification notice: This file was changed for this repository's independent
+-- GitHub Spec Kit experiment on Spring PetClinic REST.
 DROP TABLE visit_creation_results IF EXISTS;
 DROP TABLE vet_specialties IF EXISTS;
 DROP TABLE vets IF EXISTS;

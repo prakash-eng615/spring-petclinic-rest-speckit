@@ -1,3 +1,5 @@
+# Modification notice: This file was changed for this repository's independent
+# GitHub Spec Kit experiment on Spring PetClinic REST.
 # Local demo only: these public sample credentials (including the empty MySQL
 # root password) are not production credentials. Use disposable local data.
 services:
